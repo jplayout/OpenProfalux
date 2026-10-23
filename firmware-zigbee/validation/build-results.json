@@ -1,0 +1,25 @@
+{
+  "idf": "5.5.4",
+  "zigbee": "2.0.5",
+  "target": "esp32c6",
+  "builds": [
+    {
+      "poll_ms": 1000,
+      "bytes": 533840,
+      "sha256": "b977654d8135bee51e9d484b366a34dbfba368f6955a2ec7c7e2b86efbfa7ec5",
+      "result": "PASS"
+    },
+    {
+      "poll_ms": 2000,
+      "bytes": 533840,
+      "sha256": "a78a1ee2cd5b4bc81a4e1a9c9f1e6fbf2681f796b197644a3fcd26de4ec38e1d",
+      "result": "PASS"
+    },
+    {
+      "poll_ms": 5000,
+      "bytes": 533840,
+      "sha256": "1ee91c28b3d198dcf900e74ce723af0fb6d806422bd319f3791222835a6c6b38",
+      "result": "PASS"
+    }
+  ]
+}

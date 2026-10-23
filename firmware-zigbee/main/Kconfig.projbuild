@@ -1,0 +1,9 @@
+menu "OpenProfalux Zigbee simulation"
+    config OPF_ZB_POLL_INTERVAL_MS
+        int "SED keepalive/poll interval (ms)"
+        range 1000 5000
+        default 1000
+        help
+            Evaluate 1000, 2000 and 5000 ms against the real parent buffer timeout.
+            This is not the child aging timeout or the fast poll interval.
+endmenu
