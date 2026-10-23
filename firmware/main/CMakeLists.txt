@@ -68,6 +68,7 @@ idf_component_register(
         "ota_rollback.c"
         "radio.c"
         "radio_profile.c"
+        "rx_capture.c"
         "log_ring.c"
     INCLUDE_DIRS "." "${BOARD_HDR_DIR}"
     EMBED_FILES

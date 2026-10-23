@@ -9,9 +9,14 @@ inconnue fait échouer la configuration, elle ne compile pas avec de mauvaises b
 |---|---|---|
 | `isno-super` | ISNO Super (ESP32-S3-MINI-1-N8, CC1101 868 intégré) | `esp32s3` |
 | `external` | ESP32-WROOM DevKit + CC1101 externe | `esp32` |
+| `esp32-c6-supermini` | ESP32-C6FH4 + CC1101 externe (GPIO provisoires) | `esp32c6` |
 | `d1-mini` | D1 mini ESP32 + CC1101 externe (GDO0 sur IO26, SPI 1 MHz) | `esp32` |
 | `m5-atom-lite` | M5Stack ATOM Lite + CC1101 en Dupont | `esp32` |
 | `esp32-poe` | Olimex ESP32-POE + CC1101 externe (Ethernet LAN8720 en plus du Wi-Fi) | `esp32` |
+
+Pour `esp32-c6-supermini`, le brochage MOSI=18, MISO=20, SCK=19, CS=2 et GDO0=3
+est provisoire ; GDO2 n'est pas connecté. Vérifier le modèle/révision du PCB et
+la continuité des pads avant tout flash ou émission radio.
 
 ## Compiler
 

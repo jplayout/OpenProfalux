@@ -68,7 +68,7 @@ def header(d):
     if band not in bands:
         raise SystemExit("radio %s sans plage declaree dans %s" % (band, d["id"]))
     b = bands[band]
-    # SPI2_HOST existe sur l'ESP32 comme sur l'ESP32-S3 ; VSPI/HSPI_HOST ont
+    # SPI2_HOST existe sur ESP32, ESP32-S3 et ESP32-C6 ; VSPI/HSPI_HOST ont
     # disparu sur le S3. Un seul hote, valable partout, evite le #if par puce.
     freq = int(d.get("spi_freq_hz", 6_000_000))
     ws2812 = 1 if ui.get("led_ws2812", False) else 0

@@ -17,7 +17,8 @@ existante (capture + rejeu) — le moteur accepte le rejeu (rolling code non con
 - **Config UI** : Wi-Fi + MQTT (persistés en NVS).
 
 ## Matériel
-Une carte ESP32 (M5Stack ATOM Lite, DevKit, D1 mini, Olimex ESP32-POE, ISNO Super : tableau dans
+Une carte ESP32, ESP32-S3 ou ESP32-C6 (M5Stack ATOM Lite, DevKit, D1 mini, Olimex ESP32-POE,
+ISNO Super, ou cible C6FH4 SuperMini provisoire : tableau dans
 [`BUILD.md`](../BUILD.md)) + module CC1101 868 MHz (EBYTE E07-900M10S).
 Brochage : voir `boards/<carte>.json`. **CC1101 = 3.3 V max, jamais 5 V.**
 

@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "ESP32-C6FH4 (4 Mo flash SiP) sur carte miniature de type SuperMini, avec CC1101 externe 868 MHz.",
+    "Brochage provisoire fourni pour l'etape de compilation : MOSI=18, MISO=20, SCK=19, CSN=2, GDO0=3; GDO2 non connecte.",
+    "Les numeros sont des GPIO valides au niveau ESP32-C6; leur routage vers les pads de cette carte n'a pas ete verifie physiquement.",
+    "Confirmer le fabricant/revision et la continuite des broches avant tout flash ou emission RF.",
+    "SPI a 1 MHz par prudence pour un module radio externe et des fils de raccordement."
+  ],
+  "id": "esp32-c6-supermini",
+  "name": "ESP32-C6FH4 SuperMini (brochage provisoire) + CC1101 externe",
+  "ap_slug": "OpenProfalux",
+  "mcu": "esp32c6",
+  "flash_mb": 4,
+  "radios": [
+    {
+      "chip": "CC1101",
+      "band": "868",
+      "module": "CC1101 externe 868 MHz",
+      "pins": {
+        "sck": 19,
+        "miso": 20,
+        "mosi": 18,
+        "cs": 2,
+        "gdo0": 3,
+        "gdo2": -1
+      }
+    }
+  ],
+  "ui": {
+    "button": -1,
+    "led": -1,
+    "led_active_high": true
+  },
+  "region": "eu",
+  "bands_allowed_khz": [
+    {
+      "radio": "868",
+      "low": 863000,
+      "high": 870000,
+      "carrier_khz": 868350,
+      "max_dbm": 10
+    }
+  ],
+  "spi_freq_hz": 1000000
+}

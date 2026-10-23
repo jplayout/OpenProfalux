@@ -23,8 +23,9 @@
 #include <driver/rmt_encoder.h>
 #include <esp_rom_gpio.h>      /* rendre GDO0 au GPIO apres une emission RMT */
 #include "soc/gpio_sig_map.h"  /* SIG_GPIO_OUT_IDX */
-#include <esp_heap_caps.h>   /* heap_caps_aligned_alloc : buffer RX DMA-capable aligne (S3) */
+#include <esp_heap_caps.h>
 #include "keeloq_decode.h"   /* decodeur OOK HCS/KeeLoq, unite pure testable sur hote */
+#include "rx_capture.h"      /* copie bornee des fragments RMT, testable sur hote */
 
 static const char *TAG = "cc1101";
 /* ── Switch DEBUG capture RX (runtime, togglable depuis l'UI/MQTT) ──────────
@@ -85,13 +86,24 @@ int g_tx_marc = -1;   /* MARCSTATE lu juste apres le dernier STX (0x13=TX). Diag
 static spi_device_handle_t s_spi = NULL;
 static rmt_channel_handle_t s_cap = NULL;
 static QueueHandle_t s_capq = NULL;
-/* Buffer de reception RMT. Sur ESP32-S3 avec DMA, ce buffer DOIT etre en RAM
- * interne DMA-capable et aligne 64 octets, sinon le GDMA lit/ecrit les mauvaises
- * lignes de cache -> symboles parasites (glitches ~55 us) et corruption silencieuse
- * (cf esp-idf #12564, FastLED #2156). Un simple tableau statique ne garantit NI
- * l'alignement NI MALLOC_CAP_DMA. On l'alloue donc a l'init avec heap_caps. */
 #define CAP_SYMBOLS KEELOQ_CAP_SYMBOLS   /* source unique (keeloq_decode.h) */
 _Static_assert(sizeof(kq_sym_t) == sizeof(rmt_symbol_word_t), "kq_sym_t doit avoir la meme disposition que rmt_symbol_word_t");
+typedef struct {
+    const rmt_symbol_word_t *symbols;
+    size_t num_symbols;
+    bool is_last;
+    bool overflow;
+    bool failed;
+} cc_cap_done_t;
+
+/* Le buffer RMT est reutilisable des le retour du callback partiel. Le callback
+ * copie donc chaque fragment dans ce stockage borne avant de rendre la main; le
+ * consommateur ne voit que le marqueur terminal, jamais un pointeur RMT. */
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+static kq_sym_t s_cap_history[CAP_SYMBOLS];
+static rx_capture_t s_cap_capture;
+#endif
+/* Buffer RMT de travail. DMA-capable/aligne seulement quand le SoC le demande. */
 static rmt_symbol_word_t *s_capbuf = NULL;
 static size_t s_capbuf_sz = 0;
 /* RX et auto-capture partagent l'unique canal RMT s_cap sur GDO0 (memoire RMT limitee). */
@@ -535,22 +547,83 @@ int cc1101_tx_raw_bits(const char *bits, int n, int repeats) {
 
 /* ── Auto-capture : le RMT lit GDO0 pendant qu'on bit-bang (verifie la trame). ── */
 static bool IRAM_ATTR cc_cap_cb(rmt_channel_handle_t ch, const rmt_rx_done_event_data_t *e, void *ctx) {
-    BaseType_t hp = pdFALSE; xQueueSendFromISR((QueueHandle_t)ctx, e, &hp); return hp == pdTRUE;
+    BaseType_t hp = pdFALSE;
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+    rx_capture_append(&s_cap_capture, (const kq_sym_t *)e->received_symbols,
+                      e->num_symbols, e->flags.is_last);
+    if (e->flags.is_last) {
+        cc_cap_done_t done = {
+            .symbols = NULL,
+            .num_symbols = s_cap_capture.count,
+            .is_last = true,
+            .overflow = s_cap_capture.overflow,
+            .failed = s_cap_capture.failed,
+        };
+        if (xQueueSendFromISR((QueueHandle_t)ctx, &done, &hp) != pdTRUE)
+            rx_capture_mark_event_lost(&s_cap_capture);
+    }
+#else
+    if (e->flags.is_last) {
+        cc_cap_done_t done = {
+            .symbols = e->received_symbols,
+            .num_symbols = e->num_symbols,
+            .is_last = true,
+        };
+        xQueueSendFromISR((QueueHandle_t)ctx, &done, &hp);
+    }
+#endif
+    return hp == pdTRUE;
+}
+
+static void cc_cap_prepare(void) {
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+    rx_capture_reset(&s_cap_capture);
+#endif
+    if (s_capq) xQueueReset(s_capq);
+}
+
+static size_t cc_cap_snapshot(const cc_cap_done_t *done, const rmt_symbol_word_t **symbols) {
+    if (!done->is_last || done->failed) return 0;
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+    if (done->overflow) {
+        ESP_LOGW(TAG, "RMT RX: capture abandonnee apres saturation du buffer");
+        return 0;
+    }
+    if (!s_cap_capture.complete || s_cap_capture.failed ||
+        s_cap_capture.count != done->num_symbols) return 0;
+    *symbols = (const rmt_symbol_word_t *)s_cap_history;
+    return s_cap_capture.count;
+#else
+    if (!done->symbols || done->num_symbols > CAP_SYMBOLS) return 0;
+    *symbols = done->symbols;
+    return done->num_symbols;
+#endif
+}
+
+static int cc_cap_restart(void) {
+    esp_err_t err = rmt_disable(s_cap);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "RMT RX: desactivation de reprise impossible: %s", esp_err_to_name(err));
+        return -1;
+    }
+    err = rmt_enable(s_cap);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "RMT RX: reactivation impossible: %s", esp_err_to_name(err));
+        return -1;
+    }
+    cc_cap_prepare();
+    return 0;
 }
 
 int cc1101_capture_init(void) {
     if (s_cap) return 0;
-    if (!s_capq) s_capq = xQueueCreate(8, sizeof(rmt_rx_done_event_data_t));   /* une seule file : la reception est recreee apres chaque emission RMT */  /* marge : en_partial_rx genere
-                                 * plusieurs callbacks par reception ; eviter de perdre un fragment
-                                 * si le consommateur (log DEBUG) ralentit. */
+    if (!s_capq) s_capq = xQueueCreate(1, sizeof(cc_cap_done_t));
+    if (!s_capq) { ESP_LOGE(TAG, "RMT RX: allocation de la file impossible"); return -1; }
     rmt_rx_channel_config_t c = {0};
     c.clk_src = RMT_CLK_SRC_DEFAULT; c.resolution_hz = 1000000;
-    /* Une trame entiere (~132 symboles) doit tenir dans UN buffer RX, sinon la
-     * capture est hachee en pleine trame et le decode echoue (vu sur ISNO Super/S3).
-     *
-     * DEUX drapeaux decident, et ils ne vont pas ensemble (verifie dans l'ESP-IDF
-     * v6.1). Le second a coute la regression v0.2.6, cf issue #12 : il manquait a
-     * ce tableau.
+    /* mem_block_symbols configure la memoire materielle du canal. Avec
+     * en_partial_rx, le driver ESP-IDF copie les fragments dans le buffer logiciel;
+        * cc_cap_cb les copie ensuite dans son stockage borne avant reutilisation.
      *
      *   cible    words/canal   SUPPORT_DMA   SUPPORT_RX_PINGPONG
      *   esp32         64        absent        absent
@@ -558,16 +631,12 @@ int cc1101_capture_init(void) {
      *   esp32c3       48        absent        1
      *   esp32c6       48        absent        1
      *
-     * Donc le S3 est SEUL a avoir le DMA, mais le C3 et le C6 ont le ping-pong :
-     * en_partial_rx leur convient, un grand buffer non.
+      * Le nombre de mots est la memoire materielle du canal, pas la taille du
+      * buffer applicatif fourni a rmt_receive().
      *
      * - ESP32 classic : pas de DMA, mais 512 symboles tiennent en multi-blocs.
-     * - S3 : 48 words/canal seulement, donc 512 sans DMA echoue et 48 tronque la
-     *   trame. with_dma=true donne un grand buffer -> trame complete.
-     * - ⚠️ C3 et C6 : PAS de DMA RMT, donc ils tombent dans le #else a 48 words et
-     *   RESTENT TRONQUES. Ce n'est pas corrige pour eux, et aucune de nos cartes
-     *   n'est concernee (boards/ ne declare que esp32 et esp32s3). Les corriger
-     *   demanderait un autre mecanisme, par exemple une capture par GPIO+timer. */
+        * - S3 : with_dma=true, le buffer logiciel est dimensionne pour CAP_SYMBOLS.
+        * - C3/C6 : sans DMA mais avec ping-pong RX, en_partial_rx fournit les segments. */
 #if defined(CONFIG_IDF_TARGET_ESP32)
     c.mem_block_symbols = 512;    /* ESP32 : pas de DMA mais 512 en multi-blocs */
 #elif SOC_RMT_SUPPORT_DMA
@@ -578,20 +647,37 @@ int cc1101_capture_init(void) {
                                    * avec DMA corrompt (#12564) -> on prend tout le buffer. */
     c.mem_block_symbols = CAP_SYMBOLS;
 #else
-    /* C3, C6 : 48 words, la trame longue sera tronquee (voir ci-dessus). */
+    /* C3/C6 : memoire materielle minimale, collecte longue via ping-pong. */
     c.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 #endif
     c.gpio_num = CC1101_PIN_GDO0;
     if (rmt_new_rx_channel(&c, &s_cap) != ESP_OK) { ESP_LOGW(TAG, "RMT capture init KO"); s_cap = NULL; return -1; }
-    /* Buffer RX aligne + DMA-capable (voir note sur s_capbuf). */
+    /* Le buffer DMA du S3 exige alignement et RAM interne. Les autres SoC n'ont
+     * pas a reserver de memoire DMA pour le canal RX. */
     if (!s_capbuf) {
         s_capbuf_sz = CAP_SYMBOLS * sizeof(rmt_symbol_word_t);
+#if SOC_RMT_SUPPORT_DMA
         s_capbuf = heap_caps_aligned_alloc(64, s_capbuf_sz, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (!s_capbuf) { ESP_LOGW(TAG, "RMT capture: alloc buffer DMA KO"); rmt_del_channel(s_cap); s_cap = NULL; return -1; }
+#else
+        s_capbuf = heap_caps_aligned_alloc(sizeof(uintptr_t), s_capbuf_sz,
+                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#endif
+        if (!s_capbuf) { ESP_LOGW(TAG, "RMT capture: allocation du buffer RX impossible"); rmt_del_channel(s_cap); s_cap = NULL; return -1; }
     }
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+    rx_capture_init(&s_cap_capture, s_cap_history, CAP_SYMBOLS);
+#endif
     rmt_rx_event_callbacks_t cb = { .on_recv_done = cc_cap_cb };
-    rmt_rx_register_event_callbacks(s_cap, &cb, s_capq);
-    rmt_enable(s_cap);
+    esp_err_t err = rmt_rx_register_event_callbacks(s_cap, &cb, s_capq);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "RMT RX: installation du callback impossible: %s", esp_err_to_name(err));
+        rmt_del_channel(s_cap); s_cap = NULL; return -1;
+    }
+    err = rmt_enable(s_cap);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "RMT RX: activation impossible: %s", esp_err_to_name(err));
+        rmt_del_channel(s_cap); s_cap = NULL; return -1;
+    }
     /* RMT met GDO0 en input : on re-active la sortie pour pouvoir bit-banger */
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);
     return 0;
@@ -612,13 +698,26 @@ static int decode_rmt(const rmt_symbol_word_t *raw, size_t n, char *out, int max
 
 int cc1101_tx_and_capture_bits(const uint8_t *frame, size_t bits, char *out_bits, int max_bits) {
     if (!s_cap && cc1101_capture_init() != 0) return -1;
+    if (cc_cap_restart() != 0) return -2;
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);   /* on pilote GDO0 (TX) */
     rmt_receive_config_t rc = { .signal_range_min_ns = 2000, .signal_range_max_ns = 6000000 };
-    if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) return -2;
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+    rc.flags.en_partial_rx = true;
+#endif
+    if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) {
+        cc_cap_restart();
+        return -2;
+    }
     cc1101_tx_ook_frame(frame, bits);         /* bit-bang GDO0, RMT capture en parallele */
-    rmt_rx_done_event_data_t ev;
-    if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(500)) != pdTRUE) return -3;
-    return decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
+    cc_cap_done_t ev;
+    if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(500)) != pdTRUE) {
+        cc_cap_restart();
+        return -3;
+    }
+    const rmt_symbol_word_t *symbols = NULL;
+    size_t n = cc_cap_snapshot(&ev, &symbols);
+    if (!n) { cc_cap_restart(); return -4; }
+    return decode_rmt(symbols, n, out_bits, max_bits);
 }
 
 /* Ecoute (RX) pendant timeout_ms : bascule la puce en RX, capture GDO0 (donnee
@@ -635,20 +734,25 @@ int cc1101_rx_probe(void) {
     strobe(0x33); vTaskDelay(pdMS_TO_TICKS(3));
     strobe(0x3A); strobe(0x34);
     for (int i = 0; i < 50; i++) { if ((cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F) == 0x0D) break; vTaskDelay(pdMS_TO_TICKS(1)); }
-    rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq);
+    if (cc_cap_restart() != 0) return -1;
     rmt_receive_config_t rc = { .signal_range_min_ns = 3000, .signal_range_max_ns = 8000000 };
+#if SOC_RMT_SUPPORT_RX_PINGPONG
+    rc.flags.en_partial_rx = true;
+#endif
     int64_t t_end = esp_timer_get_time() + 800 * 1000;
     int nev = 0; int8_t rssi_max = -128, rssi_min = 0;
-    rmt_rx_done_event_data_t ev;
     if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) == ESP_OK) {
         while (esp_timer_get_time() < t_end) {
             int8_t r = cc1101_get_rssi(); if (r > rssi_max) rssi_max = r; if (r < rssi_min) rssi_min = r;
+            cc_cap_done_t ev;
             if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(40)) != pdTRUE) continue;
             nev++;
+            if (cc_cap_restart() != 0) break;
             if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) break;
         }
     }
     strobe(CC_SIDLE);
+    if (cc_cap_restart() != 0) return -1;
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);
     ESP_LOGI(TAG, "RX PROBE bruit: RSSI %d..%d dBm, %d evt RMT en 800ms (moins d'evt = moins de bruit/flood)",
              rssi_min, rssi_max, nev);
@@ -688,6 +792,7 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
      * l'ESP32 n'a pas assez de memoire RMT pour un 2e canal de 512 symboles
      * ("no free rx channels"). GDO0 est prouve OK par le SELFVERIFY au boot. */
     if (!s_cap && cc1101_capture_init() != 0) return -1;
+    int r = -3;
     /* GDO0 en INPUT : la CC1101 (RX, IOCFG0=0x0D) sort la donnee demodulee, on la lit */
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT);
     cc1101_write_reg(0x02, 0x0D);   /* IOCFG0 = donnee serie demodulee sur GDO0 */
@@ -711,48 +816,29 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
         vTaskDelay(pdMS_TO_TICKS(1));
     }
     ESP_LOGI(TAG, "RX(GDO0): MARCSTATE=0x%02X (0x0D=RX attendu)", cc1101_read_reg(CC_MARCSTATE | 0x40) & 0x1F);
-    /* OOK sans squelch => bruit continu sur GDO0. Une rafale Profalux (preambule + entete
-     * + 66 bits) est repetee ~10x. DEUX chemins selon la puce (cf issue #12) :
-     *  - S3/C3 (SOC_RMT_SUPPORT_RX_PINGPONG) : en_partial_rx -> le driver remplit s_capbuf
-     *    de facon CONTIGUE sur plusieurs callbacks d'UNE meme reception ; on accumule et on
-     *    decode tout le buffer (vote majoritaire dans decode_rmt sur les repetitions), on ne
-     *    re-arme qu'a la fin de reception (is_last) ou avant que le buffer ne reboucle.
-     *  - ESP32 classique : PAS de ping-pong RX -> ESP-IDF v6.1 REFUSE en_partial_rx
-     *    (rmt_rx.c: ESP_ERR_NOT_SUPPORTED) et rmt_receive echoue (regression v0.2.6). On
-     *    garde donc l'ancien fonctionnement : une reception = un evenement delimite par
-     *    l'idle, on decode l'evenement, on re-arme. */
-    rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq);
+    /* OOK sans squelch => bruit continu sur GDO0. Sur les SoC ping-pong, les
+     * fragments de la transaction sont copies a chaque callback et seul is_last
+     * publie le buffer stable au consommateur. L'ESP32 classique conserve son
+     * evenement unique delimite par l'idle; en_partial_rx n'y est pas supporte. */
+    if (cc_cap_restart() != 0) { r = -2; goto rx_listen_done; }
     int64_t t_end = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
-    int r = -3;
-    rmt_rx_done_event_data_t ev;
 #if SOC_RMT_SUPPORT_RX_PINGPONG
-    /* signal_range_max_ns plafonne a 32767000 ns (compteur 15 bits). 32 ms > la garde HCS
-     * (~16-23 ms) -> toute la rafale s'accumule dans UNE reception. en_partial_rx requis. */
+    /* 32 ms depasse le silence inter-trame HCS (~16-23 ms). Les callbacks
+     * partiels sont copies dans s_cap_history; seul is_last publie la capture. */
     rmt_receive_config_t rc = { .signal_range_min_ns = 3000, .signal_range_max_ns = 32000000,
                                 .flags.en_partial_rx = true };
-    const size_t cap = CAP_SYMBOLS;   /* capacite du buffer, en symboles */
-    size_t prev_end = 0;              /* fin (offset) du fragment precedent, pour detecter le wrap */
     if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) == ESP_OK) {
         while (esp_timer_get_time() < t_end) {
+            cc_cap_done_t ev;
             if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(100)) != pdTRUE) continue;  /* tjrs en RX */
-            /* en_partial_rx : fin reelle calculee a partir du POINTEUR (robuste a un
-             * callback manque : les symboles intermediaires sont bien dans s_capbuf). */
-            size_t off = (size_t)(ev.received_symbols - s_capbuf);
-            if (off < prev_end) {   /* le buffer a reboucle : on repart sur une capture neuve */
-                rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq); prev_end = 0;
-                if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) break;
-                continue;
-            }
-            size_t end = off + ev.num_symbols;
-            if (end > cap) end = cap;
-            prev_end = end;
-            int n = decode_rmt(s_capbuf, end, out_bits, max_bits);
-            diag_log_capture(s_capbuf, end, n, out_bits);
+            const rmt_symbol_word_t *symbols = NULL;
+            size_t nsyms = cc_cap_snapshot(&ev, &symbols);
+            if (!nsyms) { r = -2; break; }
+            int n = decode_rmt(symbols, nsyms, out_bits, max_bits);
+            diag_log_capture(symbols, nsyms, n, out_bits);
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
-            if (ev.flags.is_last || end >= cap - 160) {   /* fin de reception / wrap imminent */
-                rmt_disable(s_cap); rmt_enable(s_cap); xQueueReset(s_capq); prev_end = 0;
-                if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) break;
-            }
+            if (esp_timer_get_time() >= t_end) break;
+            if (cc_cap_restart() != 0 || rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) break;
         }
     } else r = -2;
 #else
@@ -762,15 +848,22 @@ int cc1101_rx_listen_bits(uint32_t timeout_ms, char *out_bits, int max_bits) {
     rmt_receive_config_t rc = { .signal_range_min_ns = 3000, .signal_range_max_ns = 8000000 };
     if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) == ESP_OK) {
         while (esp_timer_get_time() < t_end) {
+            cc_cap_done_t ev;
             if (xQueueReceive(s_capq, &ev, pdMS_TO_TICKS(100)) != pdTRUE) continue;  /* tjrs en RX */
-            int n = decode_rmt(ev.received_symbols, ev.num_symbols, out_bits, max_bits);
-            diag_log_capture(ev.received_symbols, ev.num_symbols, n, out_bits);
+            const rmt_symbol_word_t *symbols = NULL;
+            size_t nsyms = cc_cap_snapshot(&ev, &symbols);
+            if (!nsyms) { r = -2; break; }
+            int n = decode_rmt(symbols, nsyms, out_bits, max_bits);
+            diag_log_capture(symbols, nsyms, n, out_bits);
             if (n >= 64) { r = n; break; }                                  /* vraie trame */
-            if (rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) break;  /* re-arme */
+            if (esp_timer_get_time() >= t_end) break;
+            if (cc_cap_restart() != 0 || rmt_receive(s_cap, s_capbuf, s_capbuf_sz, &rc) != ESP_OK) break;
         }
     } else r = -2;
 #endif
+rx_listen_done:
     strobe(CC_SIDLE);
+    if (s_cap && cc_cap_restart() != 0 && r >= 0) r = -2;
     gpio_set_direction(CC1101_PIN_GDO0, GPIO_MODE_INPUT_OUTPUT);   /* restaure pour le TX bit-bang */
     return r;
 }

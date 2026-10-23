@@ -90,9 +90,13 @@ broches, il n'en connaît aucune. Ajouter une carte, c'est ajouter un
 |---|---|---|
 | `isno-super` | ISNO Super (ESP32-S3-MINI-1-N8, CC1101 868 intégré) | `esp32s3` |
 | `external` | ESP32-WROOM DevKit + CC1101 externe | `esp32` |
+| `esp32-c6-supermini` | ESP32-C6FH4 + CC1101 externe (brochage provisoire) | `esp32c6` |
 | `d1-mini` | D1 mini ESP32 + CC1101 externe (GDO0 sur IO26, SPI 1 MHz) | `esp32` |
 | `m5-atom-lite` | M5Stack ATOM Lite + CC1101 en Dupont | `esp32` |
 | `esp32-poe` | Olimex ESP32-POE + CC1101 externe (Ethernet LAN8720 en plus du Wi-Fi) | `esp32` |
+
+Le brochage C6 (MOSI=18, MISO=20, SCK=19, CS=2, GDO0=3; GDO2 non connecté)
+reste provisoire et doit être vérifié sur le PCB exact avant raccordement.
 
 ```bash
 cd firmware

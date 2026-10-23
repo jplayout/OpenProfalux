@@ -178,6 +178,23 @@ jobs:
              -o keeloq_host_test
           ./keeloq_host_test
 
+  # La collecte des fragments RMT (rx_capture.c) avant reutilisation du buffer
+  # du driver, y compris le decodage KeeLoq apres une coupure de fragment.
+  banc-rx-capture:
+    name: Banc hote de la collecte RMT RX
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: rx_capture + keeloq_decode (gcc + AddressSanitizer)
+        working-directory: firmware/test/rx-capture
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Wno-unused-parameter -fsanitize=address -g \
+             -I main -I ../../main main/test_main.c ../../main/rx_capture.c \
+             ../../main/keeloq_decode.c -o rx_capture_host_test
+          ./rx_capture_host_test
+
   # Le balayage RSSI qui trouve la porteuse d'une telecommande (freq_sweep.c) :
   # voir firmware/test/freq-sweep/README.md. Pur, un simple gcc suffit (issue #51).
   banc-freq-sweep:
