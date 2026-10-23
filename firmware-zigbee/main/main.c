@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_pm.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
@@ -161,6 +162,7 @@ static bool app_signal_handler(const ezb_app_signal_t *signal)
 
     switch (signal_type) {
     case EZB_ZDO_SIGNAL_SKIP_STARTUP:
+        ESP_LOGI(TAG, "Zigbee startup complete; initializing BDB / restoring network");
         ESP_ERROR_CHECK(ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_INITIALIZATION));
         break;
     case EZB_BDB_SIGNAL_DEVICE_FIRST_START:
@@ -170,6 +172,7 @@ static bool app_signal_handler(const ezb_app_signal_t *signal)
         ESP_LOGI(TAG, "BDB startup status=0x%02x factory_new=%d", status, ezb_bdb_is_factory_new());
         if (status == EZB_BDB_STATUS_SUCCESS) {
             if (ezb_bdb_is_factory_new()) {
+                ESP_LOGI(TAG, "Factory-new: starting network association (steering)");
                 ESP_ERROR_CHECK(ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING));
             } else {
                 ESP_LOGI(TAG, "Restored network, channel=%u address=0x%04x",
@@ -184,7 +187,10 @@ static bool app_signal_handler(const ezb_app_signal_t *signal)
         ezb_bdb_comm_status_t status =
             *(ezb_bdb_comm_status_t *)ezb_app_signal_get_params(signal);
         ESP_LOGI(TAG, "Network steering %s", status == EZB_BDB_STATUS_SUCCESS ? "complete" : "failed");
-        if (status != EZB_BDB_STATUS_SUCCESS) {
+        if (status == EZB_BDB_STATUS_SUCCESS) {
+            ESP_LOGI(TAG, "Associated: channel=%u address=0x%04x", ezb_nwk_get_current_channel(), ezb_nwk_get_short_address());
+        } else {
+            ESP_LOGW(TAG, "Association status=0x%02x; retry in 30 s", status);
             xTaskNotify(s_retry_task, EZB_BDB_MODE_NETWORK_STEERING, eSetValueWithOverwrite);
         }
         break;
@@ -215,11 +221,15 @@ static void zigbee_task(void *arg)
         },
     };
 
+    ESP_LOGI(TAG, "Initializing Zigbee: native radio, End Device, poll=%d ms", CONFIG_OPF_ZB_POLL_INTERVAL_MS);
     ESP_ERROR_CHECK(esp_zigbee_init(&config));
+    ESP_LOGI(TAG, "Zigbee initialized; configuring RX-off and four endpoints");
     ESP_ERROR_CHECK(ezb_app_signal_add_handler(app_signal_handler));
     ezb_nwk_set_rx_on_when_idle(false);
     ESP_ERROR_CHECK(create_cover_endpoints());
+    ESP_LOGI(TAG, "Registered endpoints 10..13, cluster 0x0102; starting Zigbee");
     ESP_ERROR_CHECK(esp_zigbee_start(false));
+    ESP_LOGI(TAG, "Zigbee mainloop starting");
     esp_zigbee_launch_mainloop();
 
     esp_zigbee_deinit();
@@ -228,6 +238,13 @@ static void zigbee_task(void *arg)
 
 void app_main(void)
 {
+#ifdef CONFIG_OPF_ZB_USB_DIAGNOSTIC
+    ESP_LOGI(TAG, "BOOT USB diagnostic: native USB Serial/JTAG, automatic light-sleep disabled");
+#else
+    ESP_LOGI(TAG, "BOOT low-power: UART console, automatic light-sleep enabled");
+#endif
+    ESP_LOGI(TAG, "Firmware IDF=%s, Zigbee SDK=2.0.5, simulation only", esp_get_idf_version());
+    ESP_LOGI(TAG, "Initializing NVS (preserve stored network)");
     esp_err_t nvs_status = nvs_flash_init();
     /* Fail closed: never erase network credentials on an initialization error. */
     ESP_ERROR_CHECK(nvs_status);
@@ -235,7 +252,11 @@ void app_main(void)
     esp_pm_config_t power_config = {
         .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
         .min_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+#ifdef CONFIG_OPF_ZB_USB_DIAGNOSTIC
+        .light_sleep_enable = false,
+#else
         .light_sleep_enable = true,
+#endif
     };
     ESP_ERROR_CHECK(esp_pm_configure(&power_config));
 

@@ -1,0 +1,6 @@
+# Overlay on sdkconfig.defaults; use a separate build directory and sdkconfig.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_OPF_ZB_USB_DIAGNOSTIC=y
+CONFIG_OPF_ZB_POLL_INTERVAL_MS=1000

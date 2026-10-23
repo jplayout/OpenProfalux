@@ -56,3 +56,14 @@ node profalux-gateway.test.mjs
 Ce test simule l'endpoint herdsman et vérifie les 12 commandes, les exposes,
 le refus des valeurs invalides et les erreurs de livraison. Il ne parle à aucun
 coordinateur ni broker.
+
+## Variante USB de diagnostic
+
+La [procédure USB pour Bazzite](USB-DIAGNOSTIC.md) fournit la compilation, les
+binaires, la table de partitions et les commandes de flash/monitoring à exécuter
+ultérieurement. L'overlay `sdkconfig.usb-debug.defaults` utilise la console USB
+Serial/JTAG et désactive le light-sleep automatique dans l'application ; le build
+et le sdkconfig restent dans `build-usb-debug/`. Le SED conserve RX-off, quatre
+endpoints et le polling de 1 s. Cette variante ne sert pas aux mesures sur piles.
+Les [résultats détaillés](validation/usb-debug-checks.md) incluent les tests existants
+et les deux échecs KeeLoq reproduits sur le commit de départ.

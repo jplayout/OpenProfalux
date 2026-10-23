@@ -1,0 +1,30 @@
+{
+  "idf": "5.5.4",
+  "zigbee": "2.0.5",
+  "target": "esp32c6",
+  "variant": "usb-debug",
+  "poll_ms": 1000,
+  "light_sleep": false,
+  "artifacts": [
+    {
+      "path": "build-usb-debug/bootloader/bootloader.bin",
+      "bytes": 22448,
+      "sha256": "78be09ae45ac8a69c16f5d04e769489639119040e6c30b66ec1105d77ad8565d"
+    },
+    {
+      "path": "build-usb-debug/partition_table/partition-table.bin",
+      "bytes": 3072,
+      "sha256": "7f00b6c042a89b15b0cac534f82ed988caf29278ff5700b0c511eb1b5bb7c820"
+    },
+    {
+      "path": "build-usb-debug/profalux_zigbee_sed.bin",
+      "bytes": 523552,
+      "sha256": "2a3c9c2fdd25c5d5196356ac365d4e937eac3411d839a83d4e7555a91caac8be"
+    },
+    {
+      "path": "build-usb-debug/profalux_zigbee_sed.elf",
+      "bytes": 6487972,
+      "sha256": "8c0b663d7cb12128a6dddf31a4855fb80b9e087fbb3c488611afed4f34afe5e6"
+    }
+  ]
+}

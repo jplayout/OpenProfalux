@@ -20,7 +20,9 @@ podman run --rm --network=host -v "$PWD":/project:Z \
 
 Les configurations produites sélectionnent ZB_ZED, PM, tickless idle et la valeur
 de polling attendue. La partition application de 1 Mo garde 49 % libres. Flash
-physique configurée à 4 Mo. Empreintes SHA-256 dans `build-results.json`.
+physique configurée à 4 Mo. Les empreintes et tailles du dernier rebuild (avec diagnostic USB) sont désormais
+dans `build-results.json` ; voir aussi `usb-debug-checks.md`. Les tailles de cette
+section décrivent la compilation initiale de l’étape 3.
 Aucun warning/error dans les trois logs de cette matrice finale.
 
 La première compilation de l'ébauche avait échoué sur une constante inutilisée

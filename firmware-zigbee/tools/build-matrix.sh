@@ -23,6 +23,8 @@ for ms in (1000,2000,5000):
     for expected in ('CONFIG_ZB_ZED=y','CONFIG_PM_ENABLE=y',
                      'CONFIG_FREERTOS_USE_TICKLESS_IDLE=y', f'CONFIG_OPF_ZB_POLL_INTERVAL_MS={ms}'):
         assert expected in config, expected
+    assert 'CONFIG_OPF_ZB_USB_DIAGNOSTIC=y' not in config
+    assert 'CONFIG_ESP_CONSOLE_UART_DEFAULT=y' in config
     results.append(dict(poll_ms=ms,bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),result='PASS'))
 Path('validation/build-results.json').write_text(json.dumps(dict(idf='5.5.4',zigbee='2.0.5',target='esp32c6',builds=results),indent=2)+'\n')
 PY

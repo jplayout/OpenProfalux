@@ -1,4 +1,11 @@
 menu "OpenProfalux Zigbee simulation"
+    config OPF_ZB_USB_DIAGNOSTIC
+        bool "USB diagnostic mode (disable automatic light-sleep)"
+        default n
+        depends on ESP_CONSOLE_USB_SERIAL_JTAG
+        help
+            Keep the CPU awake for native USB logs. Not intended for battery measurements.
+
     config OPF_ZB_POLL_INTERVAL_MS
         int "SED keepalive/poll interval (ms)"
         range 1000 5000
