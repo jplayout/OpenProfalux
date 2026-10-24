@@ -10,6 +10,7 @@ for interval in 1000 2000 5000; do
         -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;build-validation/poll.defaults" \
         reconfigure build > "build-validation/build-$interval.log" 2>&1
     cp build-validation/build/profalux_zigbee_sed.bin "build-validation/profalux-$interval.bin"
+    cp build-validation/build/profalux_zigbee_sed.map "build-validation/map-$interval.map"
     cp "build-validation/sdkconfig-$interval" "build-validation/config-$interval.txt"
     tail -18 "build-validation/build-$interval.log"
 done

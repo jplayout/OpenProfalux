@@ -1,5 +1,10 @@
 # Diagnostic USB natif ESP32-C6 — Bazzite / Podman
 
+Les tailles et empreintes de cette procédure décrivent le build initial du
+23 octobre. Depuis l’intégration CC1101, voir les [résultats de l’étape 4](validation/step4-checks.md).
+Les chemins et commandes restent valables pour le build USB de simulation ; le
+nouveau diagnostic SPI utilise le dossier `build-radio-diagnostic/`.
+
 Cette variante conserve IDF **5.5.4**, Zigbee **2.0.5**, le rôle SED avec RX-off,
 les endpoints **10..13** et le polling **1000 ms**. Elle utilise
 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` sur le port USB-C natif et passe

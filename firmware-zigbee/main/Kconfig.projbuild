@@ -1,4 +1,16 @@
 menu "OpenProfalux Zigbee simulation"
+    config OPF_RADIO_MODE
+        int "Boot radio mode (0 simulation, 1 diagnostic, 2 future active/TX locked)"
+        range 0 2
+        default 0
+
+    config OPF_RADIO_CONSOLE
+        bool "Local USB radio diagnostic console"
+        depends on OPF_ZB_USB_DIAGNOSTIC
+        default n
+        help
+            Explicit local mode/learn/cancel commands. Learning expires after at most 60 s.
+
     config OPF_ZB_USB_DIAGNOSTIC
         bool "USB diagnostic mode (disable automatic light-sleep)"
         default n

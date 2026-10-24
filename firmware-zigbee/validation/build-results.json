@@ -5,20 +5,20 @@
   "builds": [
     {
       "poll_ms": 1000,
-      "bytes": 535040,
-      "sha256": "ee851069c6e73eef94cf50a03034648a50a08cf440c2ff6ff75d50705ad931e9",
+      "bytes": 586032,
+      "sha256": "5453b433ccf3b332aa5f705b2a86b4c45190a5be2e615a7d49f2c4305aa6dc4d",
       "result": "PASS"
     },
     {
       "poll_ms": 2000,
-      "bytes": 535040,
-      "sha256": "e2c6a79f99598bf85810d19b347b599daf778a0b17bf0d93d732db64813dd634",
+      "bytes": 586032,
+      "sha256": "1536dd647df9886cbcebbac7c8a5dc78b01d092f57017e85627defd9f5b34fb2",
       "result": "PASS"
     },
     {
       "poll_ms": 5000,
-      "bytes": 535040,
-      "sha256": "9ac2cc5b026f3c648df7f5fe20915fc7ff7aa0f5b1431f302e3aa8e6d68b6338",
+      "bytes": 586032,
+      "sha256": "1ea58308c9edbbefa3cee51b5b91c88d7a16697a25342880a913936a7d110368",
       "result": "PASS"
     }
   ]

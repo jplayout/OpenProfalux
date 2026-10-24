@@ -1,5 +1,9 @@
 # Prototype Zigbee autonome — ESP32-C6FH4
 
+L'[intégration CC1101 de l'étape 4](RADIO-INTEGRATION.md) ajoute un diagnostic SPI
+sans émission et un apprentissage RX temporaire. Ses [résultats](validation/step4-checks.md)
+décrivent les nouveaux builds et tests. Les modes par défaut restent en simulation.
+
 Le [rapport de faisabilité](FEASIBILITY.md) décrit les versions, les limites
 énergétiques, les adaptations radio et le plan d'essai Zigbee2MQTT.
 

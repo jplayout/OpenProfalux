@@ -9,7 +9,7 @@
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#include "pfx_runtime.h"
 #include "freertos/task.h"
 
 #include "esp_zigbee.h"
@@ -20,18 +20,10 @@
 
 #define COVER_COUNT 4
 #define COVER_EP_BASE 10
-#define COMMAND_QUEUE_LENGTH 8
 #define ZIGBEE_STORAGE_PARTITION "nvs"
 
 static const char *TAG = "PFX_ZB_SED";
 
-typedef struct {
-    uint8_t endpoint;
-    uint8_t command;
-    int64_t received_us;
-} cover_command_t;
-
-static QueueHandle_t s_command_queue;
 static TaskHandle_t s_retry_task;
 
 static const char *command_name(uint8_t command)
@@ -45,18 +37,6 @@ static const char *command_name(uint8_t command)
         return "STOP";
     default:
         return "UNSUPPORTED";
-    }
-}
-
-static void command_worker(void *arg)
-{
-    cover_command_t command;
-
-    for (;;) {
-        if (xQueueReceive(s_command_queue, &command, portMAX_DELAY) == pdTRUE) {
-            ESP_LOGI(TAG, "SIMULATION endpoint=%u command=%s received_us=%" PRId64 "; no RF transmission",
-                     command.endpoint, command_name(command.command), command.received_us);
-        }
     }
 }
 
@@ -79,13 +59,13 @@ static void zcl_action_handler(ezb_zcl_core_action_callback_id_t callback_id, vo
         return;
     }
 
-    cover_command_t command = {
+    pfx_request_t command = {
         .endpoint = movement->info.dst_ep,
         .command = command_id,
         .received_us = esp_timer_get_time(),
     };
 
-    if (xQueueSend(s_command_queue, &command, 0) == pdTRUE) {
+    if (pfx_runtime_submit(command) == PFX_OK) {
         movement->out.result = EZB_ZCL_STATUS_SUCCESS;
     } else {
         movement->out.result = EZB_ZCL_STATUS_INSUFFICIENT_SPACE;
@@ -260,11 +240,9 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(esp_pm_configure(&power_config));
 
-    ESP_LOGI(TAG, "SED simulation, endpoints 10..13, polling=%d ms", CONFIG_OPF_ZB_POLL_INTERVAL_MS);
+    ESP_LOGI(TAG, "SED stage 4 (TX locked), endpoints 10..13, polling=%d ms", CONFIG_OPF_ZB_POLL_INTERVAL_MS);
 
-    s_command_queue = xQueueCreate(COMMAND_QUEUE_LENGTH, sizeof(cover_command_t));
-    configASSERT(s_command_queue != NULL);
-    configASSERT(xTaskCreate(command_worker, "cover_commands", 2048, NULL, 4, NULL) == pdPASS);
+    pfx_runtime_start();
     configASSERT(xTaskCreate(commissioning_retry_worker, "zb_retry", 3072, NULL, 3, &s_retry_task) == pdPASS);
     configASSERT(xTaskCreate(zigbee_task, "zigbee_main", 4096, NULL, 5, NULL) == pdPASS);
 }

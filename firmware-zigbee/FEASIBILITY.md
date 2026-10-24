@@ -1,5 +1,9 @@
 # Étape 3 — faisabilité de la passerelle autonome
 
+Rapport historique. Voir [l’étape 4](RADIO-INTEGRATION.md) pour le port CC1101 et
+les résultats actuels ; les validations Zigbee sur matériel communiquées depuis
+cette étude y sont distinguées des nouveaux essais logiciels.
+
 Étude du 23 octobre 2026. Décision : prototype logiciel réalisable sur ESP32-C6FH4,
 mais autonomie et latence de STOP non validées. La SuperMini est une carte de banc
 à caractériser avant de retenir son alimentation sur accumulateurs.
