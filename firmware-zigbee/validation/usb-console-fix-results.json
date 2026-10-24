@@ -1,0 +1,30 @@
+{
+  "idf": "5.5.4",
+  "zigbee": "2.0.5",
+  "hardware_status_test": "NOT RUN",
+  "builds": [
+    {
+      "build": "build-radio-diagnostic",
+      "bytes": 588576,
+      "sha256": "530e0411be75e1ac09fc19626d1534debceb6938d75a272bd9f95cc9bed87b64",
+      "result": "PASS"
+    },
+    {
+      "build": "build-usb-debug",
+      "bytes": 575488,
+      "sha256": "654ac63f7927ab618abd606bede8c36a91386a5540b23875d3c99287627d8bd0",
+      "result": "PASS"
+    },
+    {
+      "build": "build-console-lowpower",
+      "bytes": 586032,
+      "sha256": "802833530616043b5b3c0c599b15f098d37810c9f09152f8449158dcd639c580",
+      "result": "PASS"
+    }
+  ],
+  "tests": {
+    "usb_initializer_asan_ubsan": "5 PASS",
+    "radio_asan_ubsan": "PASS",
+    "status_script_fake_port": "10 PASS"
+  }
+}

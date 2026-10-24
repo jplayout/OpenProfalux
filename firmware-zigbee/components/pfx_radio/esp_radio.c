@@ -1,5 +1,9 @@
 /* ESP-IDF 5.5 port. Single worker owns radio, NVS, learning and control requests. */
+#include "sdkconfig.h"
 #include "pfx_runtime.h"
+#ifdef CONFIG_OPF_RADIO_CONSOLE
+#include "pfx_usb_console.h"
+#endif
 #include "rx_capture.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
@@ -293,14 +297,30 @@ static void radio_worker(void *arg)
     }
 }
 #ifdef CONFIG_OPF_RADIO_CONSOLE
+static TaskHandle_t s_console_task;
 static void console_worker(void *arg)
 {
     (void)arg;
+    ESP_LOGI(TAG,"USB console worker started; initializing stdin");
+    esp_err_t err=pfx_usb_console_init();
+    if(err!=ESP_OK) {
+        ESP_LOGE(TAG,"USB console unavailable: %s; radio/Zigbee worker continues",esp_err_to_name(err));
+        vTaskDelete(NULL);
+        return;
+    }
     ESP_LOGI(TAG,"Local commands: mode 0|1|2 ; learn <ep> OPEN|CLOSE|STOP <seconds 1..60> 868350|868425 ; cancel ; clear <ep> ; status");
-    char line[96]; size_t used=0; bool overflow=false;
+    char line[96]; size_t used=0; bool overflow=false; bool input_error=false;
     for(;;) {
         int ch=getchar();
-        if(ch==EOF) { clearerr(stdin); vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+        if(ch==EOF) {
+            if(!input_error) ESP_LOGW(TAG,"USB stdin unavailable; reader remains active, retry in 250 ms");
+            input_error=true;
+            used=0; overflow=false; /* Never join a partial command across an input error. */
+            clearerr(stdin);
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        if(input_error) { ESP_LOGI(TAG,"USB stdin reception resumed"); input_error=false; }
         if(ch!='\n' && ch!='\r') {
             if(used<sizeof(line)-1) line[used++]=ch; else overflow=true;
             continue;
@@ -328,7 +348,11 @@ void pfx_runtime_start(void)
     configASSERT(s_control);
     configASSERT(xTaskCreate(radio_worker,"pfx_radio",6144,NULL,4,&s_worker)==pdPASS);
 #ifdef CONFIG_OPF_RADIO_CONSOLE
-    configASSERT(xTaskCreate(console_worker,"pfx_console",3072,NULL,2,NULL)==pdPASS);
+    if(!s_console_task) {
+        BaseType_t created=xTaskCreate(console_worker,"pfx_console",3072,NULL,2,&s_console_task);
+        if(created!=pdPASS) ESP_LOGE(TAG,"Cannot create USB console task; local commands unavailable");
+        else ESP_LOGI(TAG,"USB console task created (single stdin reader)");
+    }
 #endif
 }
 pfx_result_t pfx_runtime_submit(pfx_request_t request)

@@ -1,5 +1,8 @@
 # Diagnostic USB natif ESP32-C6 — Bazzite / Podman
 
+Pour la correction de réception des commandes USB, voir [le correctif console](USB-CONSOLE-FIX.md) :
+reflash de l’application seule et test PySerial répété de `status`.
+
 Les tailles et empreintes de cette procédure décrivent le build initial du
 23 octobre. Depuis l’intégration CC1101, voir les [résultats de l’étape 4](validation/step4-checks.md).
 Les chemins et commandes restent valables pour le build USB de simulation ; le
